@@ -5,6 +5,7 @@ import { picker, fileIo as fs, fileUri } from '@kit.CoreFileKit';
 import { BasicDataSource, showToast } from '../components/Common';
 import { BusinessError, commonEventManager } from '@kit.BasicServicesKit';
 import { VpnItem } from '../components/VpnItem';
+import VPNTools from '../tools/VPNTools'
 
 const TAG: string = '[PageIndex]'
 
@@ -50,6 +51,7 @@ interface ItemData {
   name: string
   cfg: string
   fullPath: string
+  remote?: string
 }
 
 @Entry
@@ -57,6 +59,7 @@ interface ItemData {
 struct Index {
   private data: BasicDataSource<ItemData> = new BasicDataSource<ItemData>();
   @State vpnConfig: string = '';
+  @Provide('navPathStack') navPathStack: NavPathStack = new NavPathStack();
 
   getDir(): string {
     return this.getUIContext().getHostContext()?.filesDir + '/ovpn'
@@ -74,7 +77,13 @@ struct Index {
       for (let name of files) {
         const fullPath = dir + '/' + name
         const cfg = await fs.readText(fullPath)
-        this.data.push({ name, cfg, fullPath })
+        const remote = VPNTools.clientRemoteIP(cfg)
+        this.data.push({
+          name,
+          cfg,
+          fullPath,
+          remote
+        })
       }
     } catch (e) {
       console.error(e)
@@ -82,75 +91,146 @@ struct Index {
   }
 
   build() {
-    Column() {
-      Image($r('app.media.logo_splash'))
-        .autoResize(true)
-        .fitOriginalSize(true)
-        .objectFit(ImageFit.CENTER)
-        .width('85%')
-        .height('12%')
-        .margin({ top: 2 })
-
-      List() {
-        LazyForEach(this.data, (item: ItemData) => {
-          ListItem() {
-            VpnItem(item)
-          }.width('100%')
+    Navigation(this.navPathStack) {
+      RelativeContainer() {
+        Column() {
+          Text('Have a configuration file instead (.ovpn)?')
+          Button({ type: ButtonType.Normal }) {
+            Row() {
+              Image($r('app.media.uploadfile'))
+                .width(25)
+                .height(25)
+              Text('Upload File')
+                .margin({
+                  left: 10
+                })
+            }
+          }
+          .backgroundColor('#F9FAFB')
+          .borderRadius('15px')
+          .borderWidth('1px')
+          .borderColor(Color.Gray)
+          .padding({
+            top: 5,
+            bottom: 5,
+            left: 20,
+            right: 20
+          })
+          .margin({
+            top: 15
+          })
+          .onClick(async () => {
+            try {
+              const dp = new picker.DocumentViewPicker();
+              const uris = await dp.select({ fileSuffixFilters: ['.ovpn'] })
+              if (!uris || !uris.length) {
+                return
+              }
+              const dir = this.getDir()
+              for (let uri of uris) {
+                const fUri = new fileUri.FileUri(uri)
+                const cfg = await fs.readText(fUri.path)
+                const fullPath = `${dir}/${fUri.name}`
+                const fd = await fs.open(fullPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE)
+                await fs.write(fd.fd, cfg)
+                await fs.close(fd)
+                const remote = VPNTools.clientRemoteIP(cfg)
+                this.data.push({
+                  name: fUri.name,
+                  cfg,
+                  fullPath,
+                  remote
+                })
+              }
+            } catch (e) {
+              showToast(this.getUIContext(), `fileErr: ${JSON.stringify(e)}`, 4000);
+            }
+          })
+        }
+        .alignRules({
+          left: { anchor: "__container__", align: HorizontalAlign.Start },
+          right: { anchor: "__container__", align: HorizontalAlign.End },
+          top: { anchor: "__container__", align: VerticalAlign.Top },
         })
-      }.width('100%').height('auto')
+        .backgroundColor('#F9FAFB')
+        .padding({
+          top: 20,
+          bottom: 20
+        })
+        .margin(15)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .borderRadius('15px')
+        .borderWidth('1px')
+        .borderColor(Color.Gray)
+        .id('column1')
 
-      Row() {
-        Button('Add').onClick(async () => {
-          try {
-            const dp = new picker.DocumentViewPicker();
-            const uris = await dp.select({ fileSuffixFilters: ['.ovpn'] })
-            if (!uris || !uris.length) {
-              return
+        List() {
+          LazyForEach(this.data, (item: ItemData) => {
+            ListItem() {
+              VpnItem(item)
             }
-            const dir = this.getDir()
-            for (let uri of uris) {
-              const fUri = new fileUri.FileUri(uri)
-              const cfg = await fs.readText(fUri.path)
-              const fullPath = `${dir}/${fUri.name}`
-              const fd = await fs.open(fullPath, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE)
-              await fs.write(fd.fd, cfg)
-              await fs.close(fd)
-              this.data.push({ name: fUri.name, cfg, fullPath })
-            }
-          } catch (e) {
-            showToast(this.getUIContext(), `fileErr: ${JSON.stringify(e)}`, 4000);
-          }
-        }).fontSize(24).margin({ left: 5 })
+            .width('100%')
+            .gesture(
+              LongPressGesture()
+                .onAction((event: GestureEvent) => {
+                  this.getUIContext().showAlertDialog({
+                    title: '温馨提示',
+                    message: '您确定删除当前配置文件吗？',
+                    primaryButton: {
+                      value: '确定',
+                      action: () => {
 
-        Button('Log').onClick(async () => {
-          try {
-            await this.getUIContext().getRouter().pushUrl({ url: 'pages/Log' })
-          } catch (e) {
-            showToast(this.getUIContext(), `openLogErr: ${JSON.stringify(e)}`, 4000);
-          }
-        }).fontSize(24).margin({ left: 5 })
+                      }
+                    },
+                    secondaryButton: {
+                      value: '取消',
+                      defaultFocus: true,
+                      action: () => {
 
-        Button('Clear').onClick(async () => {
+                      }
+                    },
+                    cancel: () => {
+
+                    }
+                  })
+                })
+            )
+          })
+        }
+        .alignRules({
+          left: { anchor: "__container__", align: HorizontalAlign.Start },
+          right: { anchor: "__container__", align: HorizontalAlign.End },
+          top: { anchor: "column1", align: VerticalAlign.Bottom },
+          bottom: { anchor: "__container__", align: VerticalAlign.Bottom }
+        })
+      }
+      .width('100%')
+      .height('100%')
+    }
+    .title('OpenVPN Connect')
+    .backgroundColor(Color.White)
+    .menus([
+      {
+        value: '日志',
+        icon: $r('app.media.history_log'),
+        action: async () => {
+          this.navPathStack.pushPathByName('Log', '')
+        }
+      },
+      {
+        value: '清理',
+        icon: $r('app.media.log_clear'),
+        action: async () => {
           try {
             await fs.truncate(this.getUIContext().getHostContext()?.filesDir + '/ovpn.log')
             showToast(this.getUIContext(), `clear log success`, 1000);
           } catch (e) {
             showToast(this.getUIContext(), `clearLogErr: ${JSON.stringify(e)}`, 4000);
           }
-        }).fontSize(24).margin({ left: 5 })
-
-      }.width('90%').margin({ top: 5, bottom: 5 })
-
-      Row(){
-        Button('Browser').onClick(async () => {
-          try {
-            await this.getUIContext().getRouter().pushUrl({ url: 'pages/Browser' })
-          } catch (e) {
-            showToast(this.getUIContext(), `browserErr: ${JSON.stringify(e)}`, 4000);
-          }
-        }).fontSize(24).margin({ left: 5 })
-      }.width('90%')
-    }.width('100%').height('100%')
+        }
+      }
+    ])
   }
 }
 
